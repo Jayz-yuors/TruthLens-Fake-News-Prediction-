@@ -1,0 +1,4 @@
+fastapi uvicorn tensorflow keras 
+lime scikit-learn requests beautifulsoup4 
+python-multipart PyPDF2 python-docx 
+pandas numpy aiofiles streamlit
