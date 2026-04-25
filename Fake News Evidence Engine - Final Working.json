@@ -1,0 +1,191 @@
+{
+  "name": "Fake News Evidence Engine - Final",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "evidence",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "acb586b2-16cd-48e6-ad71-4f461e2e41f8",
+      "name": "Webhook",
+      "webhookId": "0cd940b0-306e-4829-8eb8-f93b730ffd7e"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json.body || {};\nlet text = \"\";\nif (input.text) text = input.text;\nelse if (input.url) text = input.url;\nelse if (input.headline) text = input.headline;\nelse text = JSON.stringify(input);\ntext = text.toLowerCase().replace(/[^a-z0-9\\\\s-]/g, \" \").replace(/\\\\s+/g, \" \").trim();\nreturn [{json: {normalized_text: text, timestamp: new Date().toISOString()}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "2dcd67c0-d9e4-475d-a1ea-2a44b2583d3a",
+      "name": "Text Cleaning"
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.normalized_text || \"\";\n\n// 🔥 fallback if empty input\nif (!text || text.length === 0) {\n  return [{\n    json: {\n      query: \"latest news technology business\",\n      keywords: [\"news\", \"technology\", \"business\"],\n      is_fallback: true\n    }\n  }];\n}\n\n// split words\nconst words = text.split(\" \").filter(w => w.length > 3);\n\n// 🔥 fallback if too short\nif (words.length === 0) {\n  return [{\n    json: {\n      query: \"latest news\",\n      keywords: [\"news\"],\n      is_fallback: true\n    }\n  }];\n}\n\n// remove stopwords\nconst stopwords = [\n  \"the\",\"and\",\"are\",\"that\",\"this\",\"have\",\"from\",\"with\",\"been\",\"were\",\n  \"than\",\"also\",\"will\",\"would\",\"could\",\"they\",\"them\",\"their\",\"what\",\n  \"when\",\"which\",\"your\",\"about\",\"after\",\"before\",\"into\",\"over\"\n];\n\nconst filtered = words.filter(w => !stopwords.includes(w));\n\n// 🔥 fallback if nothing left\nif (filtered.length === 0) {\n  return [{\n    json: {\n      query: \"breaking news\",\n      keywords: [\"news\"],\n      is_fallback: true\n    }\n  }];\n}\n\n// 🔥 frequency scoring\nconst freq = {};\nfiltered.forEach(w => {\n  freq[w] = (freq[w] || 0) + 1;\n});\n\n// sort by importance\nconst sorted = Object.entries(freq)\n  .sort((a, b) => b[1] - a[1])\n  .map(e => e[0]);\n\nconst top = sorted.slice(0, 6);\n\n// 🔥 FINAL OUTPUT (IMPORTANT)\nreturn [{\n  json: {\n    query: top.join(\" \"),\n    keywords: top,\n    is_fallback: false\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ],
+      "id": "5e06c3a8-47ec-4eac-8525-cc35a8744478",
+      "name": "Keyword Extraction"
+    },
+    {
+      "parameters": {
+        "url": "https://newsapi.org/v2/everything",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{$json.query}}"
+            },
+            {
+              "name": "apiKey",
+              "value": "e70799b1025842f39f3593cea30a36bb"
+            },
+            {
+              "name": "language",
+              "value": "en"
+            },
+            {
+              "name": "sortBy",
+              "value": "publishedAt"
+            },
+            {
+              "name": "pageSize",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        608,
+        0
+      ],
+      "id": "d44bcf0d-ade0-4819-a63b-2195b15bf9d6",
+      "name": "NewsAPI Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const articles = $json.articles || [];\n\n// ✅ FIXED node reference\nconst query = $node[\"Keyword Extraction\"].json.query || \"\";\nconst keywords = ($node[\"Keyword Extraction\"].json.query || \"\").split(\" \");\n\nconst TRUSTED = [\"bbc\", \"reuters\", \"associated press\", \"ap\", \"cnn\", \"guardian\", \"nytimes\", \"washington post\", \"ft\", \"economist\", \"npr\"];\n\nlet matchCount = 0, trustedSources = 0, relatedArticles = [];\n\nif (!articles || articles.length === 0) {\n  return [{\n    json: {\n      query_used: query,\n      match_count: 0,\n      trusted_sources: 0,\n      credibility: \"LOW\",\n      related_articles: []\n    }\n  }];\n}\n\nfor (let article of articles) {\n  const title = (article.title || \"\").toLowerCase();\n  const source = (article.source?.name || \"\").toLowerCase();\n\n  let score = 0, matched = [];\n\n  for (let kw of keywords) {\n    const k = kw.toLowerCase();\n    if (title.includes(k)) {\n      score += 3;\n      matched.push(kw);\n    }\n  }\n\n  if (matched.length >= 1 || score >= 2) {\n    matchCount++;\n    relatedArticles.push(article.url);\n  }\n\n  if (TRUSTED.some(t => source.includes(t))) {\n    trustedSources++;\n  }\n}\n\nlet credibility = \"LOW\";\n\nif (trustedSources >= 3) credibility = \"HIGH\";\nelse if (trustedSources >= 2 && matchCount >= 2) credibility = \"HIGH\";\nelse if (trustedSources >= 1 && matchCount >= 2) credibility = \"MEDIUM\";\nelse if (matchCount >= 3) credibility = \"MEDIUM\";\n\nreturn [{\n  json: {\n    query_used: query,\n    match_count: matchCount,\n    trusted_sources: trustedSources,\n    credibility: credibility,\n    related_articles: relatedArticles.slice(0, 5)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        0
+      ],
+      "id": "e4dff52f-b4b4-42ee-bc56-623eefa8e2da",
+      "name": "Article Analysis"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1008,
+        0
+      ],
+      "id": "95b39238-ed6f-4365-8586-9369086f1219",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Text Cleaning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Cleaning": {
+      "main": [
+        [
+          {
+            "node": "Keyword Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keyword Extraction": {
+      "main": [
+        [
+          {
+            "node": "NewsAPI Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NewsAPI Request": {
+      "main": [
+        [
+          {
+            "node": "Article Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Article Analysis": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "Indian/Maldives",
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "timeSavedPerExecution": 5
+  },
+  "versionId": "d6ab037c-c572-4cf9-8719-f58a377dfdbf",
+  "meta": {
+    "instanceId": "af55d3e33d7ed17fe8a93a5bf19f1fe5c94fe84f7b31c987b940b794f9123d93"
+  },
+  "id": "EJmmanNrkSxRdvln",
+  "tags": []
+}
