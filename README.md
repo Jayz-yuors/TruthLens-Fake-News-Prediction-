@@ -193,8 +193,8 @@ Get a free NewsAPI key at: https://newsapi.org/register
 ### Step 1 — Clone the repository
 
 ```bash
-git clone https://github.com/your-username/fake-news-detector.git
-cd fake-news-detector
+git clone https://github.com/Jayz-yuors/TruthLens-Fake-News-Prediction-.git
+cd FakeNewsPrediction
 ```
 
 ### Step 2 — Create and activate virtual environment
